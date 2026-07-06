@@ -8,15 +8,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_axdata_user_package_depends_on_core_and_exposes_cli() -> None:
+def test_axdata_user_package_exposes_single_public_install_entrypoint() -> None:
     pyproject = tomllib.loads(
         (REPO_ROOT / "packages" / "axdata-sdk" / "pyproject.toml").read_text(encoding="utf-8")
     )
     dependencies = set(pyproject["project"]["dependencies"])
 
-    assert "axdata-core[parquet]>=0.1.0" in dependencies
+    assert not any(item.startswith("axdata-core") for item in dependencies)
+    assert not any(item.startswith("axdata-source-") for item in dependencies)
+    assert "duckdb>=0.9" in dependencies
     assert "fastapi>=0.115.0" in dependencies
+    assert "lxml>=5.2.0" in dependencies
+    assert "packaging>=23" in dependencies
     assert "pandas>=1.5.0" in dependencies
+    assert "pyarrow>=16.0.0" in dependencies
     assert "pydantic>=2.7.0" in dependencies
     assert "python-multipart>=0.0.9" in dependencies
     assert pyproject["project"]["scripts"]["axdata"] == "axdata_core.cli:main"
@@ -86,12 +91,17 @@ def test_packaging_smoke_script_uses_temporary_environment_by_default() -> None:
 
 def test_pypi_readiness_script_is_local_only() -> None:
     script = REPO_ROOT / "scripts" / "pypi_readiness.py"
+    build_script = REPO_ROOT / "scripts" / "build_pypi_dist.py"
     source = script.read_text(encoding="utf-8")
+    build_source = build_script.read_text(encoding="utf-8")
 
     assert script.is_file()
+    assert build_script.is_file()
     assert "tempfile.TemporaryDirectory" in source
-    assert "shutil.copytree" in source
+    assert "build_pypi_dist.py" in source
+    assert "shutil.copytree" in build_source
     assert "twine\", \"check\"" in source
     assert "twine\", \"upload\"" not in source
+    assert "twine\", \"upload\"" not in build_source
     assert "testpypi" not in source.lower()
     assert "pypi.org/legacy" not in source
