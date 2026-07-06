@@ -37,6 +37,43 @@ SOURCE_ORDER = (
     "财联社",
     "开盘红",
 )
+TDX_ASSET_GROUP_ORDER = (
+    "股票数据",
+    "指数数据",
+    "ETF数据",
+    "基金数据",
+    "期货数据",
+    "期权数据",
+    "债券数据",
+    "外汇数据",
+    "宏观数据",
+    "其它数据",
+)
+CATEGORY_ORDER = (
+    "基础数据",
+    "实时数据",
+    "短线数据",
+    "行情数据",
+    "竞价数据",
+    "财务数据",
+    "F10数据",
+    "公告数据",
+    "龙虎榜数据",
+    "融资融券数据",
+    "研报数据",
+    "财务报表",
+    "交易行为",
+    "公告",
+    "研报",
+    "期货数据",
+    "期权数据",
+    "基金数据",
+    "债券数据",
+    "外汇数据",
+    "宏观数据",
+    "特色数据",
+    "其它",
+)
 DOC_PAGES: tuple[tuple[str, str], ...] = (
     ("quickstart.md", "快速开始"),
     ("architecture.md", "架构设计"),
@@ -264,6 +301,7 @@ def render_home(entries: Sequence[Mapping[str, Any]], generated_at: str) -> str:
   <div class="actions">
     <a class="button primary" href="interfaces/index.html">查看接口文档</a>
     <a class="button" href="docs/quickstart.html">快速开始</a>
+    <a class="button" href="{escape(PYPI_URL)}">PyPI 包</a>
   </div>
 </section>
 <section>
@@ -376,38 +414,113 @@ def app_shell(sidebar: str, content: str) -> str:
 
 
 def interface_sidebar(entries: Sequence[Mapping[str, Any]], active_slug: str | None = None) -> str:
-    grouped: dict[str, list[Mapping[str, Any]]] = {}
-    for entry in entries:
-        grouped.setdefault(str(entry["source_name_zh"]), []).append(entry)
-    sections: list[str] = [
-        f"""
-<div class="sidebar-head">
-  <div>
-    <p>接口目录</p>
-    <strong>全部接口</strong>
-  </div>
-  <span>{len(entries)}</span>
-</div>
-<a class="sidebar-link {'active' if active_slug is None else ''}" href="index.html">接口一览</a>
+    tree = build_interface_tree(entries)
+    nodes = "\n".join(render_nav_node(node, active_slug, level=0, parent_path=()) for node in tree)
+    active_index = " active" if active_slug is None else ""
+    return f"""
+<div class="sidebar-heading"><span class="sidebar-icon">&lt;/&gt;</span><span>接口目录</span></div>
+<a class="source-filter-summary{active_index}" href="index.html">
+  <span class="source-filter-current"><strong>全部接口</strong><em>{len(entries)}</em></span>
+  <span class="source-filter-action">接口一览</span>
+</a>
+<div class="catalog-tree">{nodes}</div>
 """
-    ]
-    for source, source_entries in sorted(grouped.items(), key=lambda item: source_sort_key(item[0])):
-        links = "".join(
-            f"<a class=\"sidebar-link {'active' if entry['slug'] == active_slug else ''}\" href=\"{escape(str(entry['slug']))}.html\">{escape(str(entry['title']))}</a>"
-            for entry in source_entries[:12]
-        )
-        more = ""
-        if len(source_entries) > 12:
-            more = f"<span class=\"sidebar-more\">还有 {len(source_entries) - 12} 个接口，可在接口一览搜索</span>"
-        sections.append(
-            f"""
-<details class="sidebar-group" open>
-  <summary><span>{escape(source)}</span><em>{len(source_entries)}</em></summary>
-  <div>{links}{more}</div>
+
+
+def build_interface_tree(entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    roots: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        path = navigation_path(entry)
+        level = roots
+        node: dict[str, Any] | None = None
+        for part in path:
+            node = level.setdefault(part, {"title": part, "children": {}, "items": []})
+            level = node["children"]
+        if node is not None:
+            node["items"].append(entry)
+    return sorted_nav_nodes(roots, parent_path=())
+
+
+def navigation_path(entry: Mapping[str, Any]) -> list[str]:
+    raw = entry.get("menu_path") or []
+    parts = [str(item).strip() for item in raw if str(item).strip()]
+    source = str(entry.get("source_name_zh") or "其它").strip() or "其它"
+    if not parts:
+        parts = [source, str(entry.get("category") or "接口")]
+    elif parts[0] != source and parts[0] not in SOURCE_ORDER:
+        parts = [source, *parts]
+    return parts
+
+
+def sorted_nav_nodes(nodes: Mapping[str, dict[str, Any]], parent_path: Sequence[str]) -> list[dict[str, Any]]:
+    return sorted(nodes.values(), key=lambda node: nav_sort_key(str(node["title"]), parent_path))
+
+
+def nav_sort_key(title: str, parent_path: Sequence[str]) -> tuple[int, str]:
+    if not parent_path:
+        order = SOURCE_ORDER
+    elif parent_path[0] == "通达信" and len(parent_path) == 1:
+        order = TDX_ASSET_GROUP_ORDER
+    else:
+        order = CATEGORY_ORDER
+    try:
+        return (order.index(title), "")
+    except ValueError:
+        return (len(order), title)
+
+
+def nav_node_count(node: Mapping[str, Any]) -> int:
+    children = node.get("children") or {}
+    return len(node.get("items") or []) + sum(nav_node_count(child) for child in children.values())
+
+
+def nav_node_has_active(node: Mapping[str, Any], active_slug: str | None) -> bool:
+    if not active_slug:
+        return False
+    if any(str(item.get("slug")) == active_slug for item in node.get("items") or []):
+        return True
+    return any(nav_node_has_active(child, active_slug) for child in (node.get("children") or {}).values())
+
+
+def render_nav_node(
+    node: Mapping[str, Any],
+    active_slug: str | None,
+    *,
+    level: int,
+    parent_path: Sequence[str],
+) -> str:
+    title = str(node["title"])
+    children = sorted_nav_nodes(node.get("children") or {}, (*parent_path, title))
+    items = sorted(node.get("items") or [], key=lambda entry: (str(entry.get("title") or ""), str(entry.get("name") or "")))
+    has_active = nav_node_has_active(node, active_slug)
+    open_by_default = has_active or (active_slug is None and level <= 1)
+    open_attr = " open" if open_by_default else ""
+    child_html = "".join(
+        render_nav_node(child, active_slug, level=level + 1, parent_path=(*parent_path, title))
+        for child in children
+    )
+    item_html = "".join(render_nav_item(entry, active_slug, level + 1) for entry in items)
+    count = nav_node_count(node)
+    return f"""
+<details class="tree-group tree-level-{level}"{open_attr}>
+  <summary class="tree-group-toggle tree-level-{level}">
+    <span class="tree-chevron"></span>
+    <span>{escape(title)}</span>
+    <em>{count}</em>
+  </summary>
+  <div class="tree-children tree-level-{level}">{child_html}{item_html}</div>
 </details>
 """
-        )
-    return "\n".join(sections)
+
+
+def render_nav_item(entry: Mapping[str, Any], active_slug: str | None, level: int) -> str:
+    active = " active" if str(entry.get("slug")) == active_slug else ""
+    return f"""
+<a class="tree-item tree-level-{level}{active}" href="{escape(str(entry['slug']))}.html">
+  <span><strong>{escape(str(entry['title']))}</strong><small>{escape(str(entry['name']))}</small></span>
+  <em>POST</em>
+</a>
+"""
 
 
 def render_interface_index_row(entry: Mapping[str, Any]) -> str:
@@ -442,49 +555,66 @@ def render_interface_detail(
     request = entry["example"]["request"]
     response = entry["example"]["response"]
     meta = [
-        ("接口名", entry["name"]),
+        ("接口类型", "临时请求（HTTP POST，查一次返回一次）"),
+        ("调用路径", f"/v1/request/{entry['name']}"),
+        ("接口名称", entry["name"]),
         ("Provider", entry.get("provider_id") or entry.get("source_code") or ""),
-        ("数据源", f"{entry['source_name_zh']} / {entry['source_code']}"),
-        ("目录", " / ".join(str(item) for item in entry.get("menu_path") or [])),
+        ("源", f"{entry['source_name_zh']} / {entry['source_code']}"),
         ("资产类型", entry.get("asset_class") or "unknown"),
-        ("请求模式", entry.get("request_mode") or "source_request"),
+        ("插件状态", entry.get("plugin_status") or "enabled"),
+        ("信任级别", entry.get("effective_trust_level") or entry.get("declared_trust_level") or "community"),
         ("采集支持", collection_label(entry.get("collection"))),
     ]
     content = f"""
-<section class="page-head">
-  <p class="breadcrumb"><a href="index.html">接口文档</a> / {escape(str(entry['source_name_zh']))}</p>
-  <h1>{escape(str(entry['title']))}</h1>
-  <p class="code-title">{escape(str(entry['name']))}</p>
-  <p class="lead">{escape(str(entry['summary']))}</p>
+<section class="interface-head">
+  <div class="interface-title-row">
+    <span class="interface-icon">&lt;/&gt;</span>
+    <div>
+      <h1>{escape(str(entry['title']))}<span>{escape(str(entry['source_name_zh']))}</span></h1>
+      <p>{escape(str(entry['summary']))}</p>
+    </div>
+  </div>
 </section>
-<section>
-  <h2>接口信息</h2>
-  {definition_grid(meta)}
-  <p>{escape(str(entry['description_text']))}</p>
+<section class="interface-section">
+  {metadata_list(meta)}
+  <p class="section-note">{escape(str(entry['description_text']))}</p>
 </section>
-<section>
-  <h2>参数</h2>
+<section class="interface-section">
+  <h2>输入参数</h2>
   {parameter_table(entry.get("parameters") or [])}
   {optional_note("参数说明", entry.get("params_note_zh"))}
   {optional_note("参数示例", entry.get("params_example_zh"))}
 </section>
-<section>
+<section class="interface-section">
   <h2>返回字段</h2>
   {field_table(entry.get("fields") or [])}
 </section>
-<section>
+<section class="interface-section">
   <h2>调用示例</h2>
-  <h3>Python SDK</h3>
-  {code_block(sdk_example(str(entry['name']), request), "python")}
-  <h3>HTTP API</h3>
-  {code_block(http_example(str(entry['name']), request), "http")}
+  <div class="example-grid">
+    <div>
+      <h3>Python SDK</h3>
+      {code_block(sdk_example(str(entry['name']), request), "python")}
+    </div>
+    <div>
+      <h3>HTTP API</h3>
+      {code_block(http_example(str(entry['name']), request), "http")}
+    </div>
+  </div>
 </section>
-<section>
+<section class="interface-section">
   <h2>真实样例快照</h2>
-  <h3>请求参数</h3>
-  {code_block(json.dumps(request, ensure_ascii=False, indent=2), "json")}
-  <h3>响应样例</h3>
-  {code_block(json.dumps(response, ensure_ascii=False, indent=2), "json")}
+  <p class="snapshot-note">展示插件接口目录里的固定 example.response，页面打开不会再次请求源端。</p>
+  <div class="example-grid">
+    <div>
+      <h3>请求参数</h3>
+      {code_block(json.dumps(request, ensure_ascii=False, indent=2), "json")}
+    </div>
+    <div>
+      <h3>响应样例</h3>
+      {response_preview(response)}
+    </div>
+  </div>
 </section>
 {reference_sections(entry.get("reference_sections") or [])}
 <p class="build-note">生成时间：{escape(generated_at)}</p>
@@ -699,7 +829,7 @@ def page(title: str, body: str, *, active: str) -> str:
   <title>{escape(title)}</title>
   <link rel="stylesheet" href="{escape(css_href)}">
 </head>
-<body>
+<body class="page-{escape(active)}">
   <header class="site-header">
     <a class="brand" href="{escape(root_link(active, 'index.html'))}"><span class="brand-mark"></span><span>AxData</span></a>
     <nav>{nav}</nav>
@@ -723,6 +853,14 @@ def definition_grid(items: Sequence[tuple[str, Any]]) -> str:
         for label, value in items
     )
     return f"<dl class=\"definition-grid\">{cells}</dl>"
+
+
+def metadata_list(items: Sequence[tuple[str, Any]]) -> str:
+    rows = "".join(
+        f"<div><dt>{escape(str(label))}</dt><dd>{escape(str(value))}</dd></div>"
+        for label, value in items
+    )
+    return f"<dl class=\"metadata-list\">{rows}</dl>"
 
 
 def parameter_table(parameters: Sequence[Mapping[str, Any]]) -> str:
@@ -791,6 +929,43 @@ def optional_note(title: str, value: Any) -> str:
     if not text:
         return ""
     return f"<div class=\"note\"><strong>{escape(title)}</strong><p>{escape(text)}</p></div>"
+
+
+def response_preview(response: Sequence[Any]) -> str:
+    if not response:
+        return "<p class=\"empty-state\">暂无固定响应样例。</p>"
+    first_mapping = next((item for item in response if isinstance(item, Mapping)), None)
+    if first_mapping is None:
+        return code_block(json.dumps(list(response)[:5], ensure_ascii=False, indent=2), "json")
+
+    columns = list(first_mapping.keys())
+    for item in response:
+        if not isinstance(item, Mapping):
+            continue
+        for key in item.keys():
+            if key not in columns:
+                columns.append(key)
+
+    visible_rows = [item for item in response if isinstance(item, Mapping)][:5]
+    head = "".join(f"<th>{escape(str(column))}</th>" for column in columns)
+    body = "".join(
+        "<tr>"
+        + "".join(f"<td>{escape(compact_cell(row.get(column)))}</td>" for column in columns)
+        + "</tr>"
+        for row in visible_rows
+    )
+    more = ""
+    if len(response) > len(visible_rows):
+        more = f"<p class=\"snapshot-more\">仅展示前 {len(visible_rows)} 条，共 {len(response)} 条固定样例。</p>"
+    return f"<div class=\"table-wrap sample-table\"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>{more}"
+
+
+def compact_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)
 
 
 def sdk_example(interface_name: str, request: Mapping[str, Any]) -> str:
@@ -972,6 +1147,10 @@ main {
   margin: 0 auto;
   padding: 26px 0 56px;
 }
+.page-interfaces main {
+  width: 100%;
+  padding: 0;
+}
 section {
   margin: 0 0 28px;
   padding: 0;
@@ -994,7 +1173,7 @@ h1 {
   font-size: clamp(32px, 5vw, 56px);
 }
 .app-content h1 {
-  font-size: clamp(34px, 4vw, 44px);
+  font-size: clamp(30px, 3vw, 38px);
 }
 h2 {
   margin: 0 0 14px;
@@ -1073,89 +1252,227 @@ figcaption {
 }
 .app-shell {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
-  gap: 28px;
-  align-items: start;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
 }
 .app-sidebar {
   position: sticky;
-  top: 76px;
-  max-height: calc(100vh - 92px);
-  overflow: auto;
-  padding: 16px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--sidebar);
+  top: 60px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+  padding: 20px 16px 28px;
+  border-right: 1px solid #edf1f6;
+  background: #fff;
+  scrollbar-color: #d4ddea transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 .app-content {
   min-width: 0;
-  padding-bottom: 24px;
+  padding: 34px clamp(24px, 4vw, 54px) 56px;
 }
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.sidebar-head p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.sidebar-head strong {
-  display: block;
-  font-size: 18px;
-}
-.sidebar-head span {
-  min-width: 36px;
-  padding: 2px 8px;
+.app-sidebar::-webkit-scrollbar { width: 10px; }
+.app-sidebar::-webkit-scrollbar-track { background: transparent; }
+.app-sidebar::-webkit-scrollbar-thumb {
+  border: 3px solid #fff;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  font-size: 12px;
-  text-align: center;
+  background: #d4ddea;
+  background-clip: padding-box;
 }
-.sidebar-group {
-  border-top: 1px solid var(--line);
-  padding: 8px 0;
-}
-.sidebar-group summary {
-  cursor: pointer;
+.sidebar-heading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  color: var(--accent-strong);
-  font-weight: 750;
-  font-size: 14px;
-  list-style: none;
+  margin-bottom: 14px;
+  color: #263244;
+  font-size: 1.05rem;
+  font-weight: 800;
 }
-.sidebar-group summary::-webkit-details-marker { display: none; }
-.sidebar-group em {
-  font-style: normal;
-  color: var(--muted);
+.sidebar-icon {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 6px;
+  background: #eef5ff;
+  color: #2563eb;
+  font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
 }
-.sidebar-link {
-  display: block;
-  margin: 4px 0;
-  padding: 6px 8px;
+.source-filter-summary {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  border: 1px solid #dfe7f2;
   border-radius: 6px;
-  color: #334155;
-  font-size: 13px;
-  line-height: 1.35;
+  background: #fbfcfe;
+  color: #526173;
+  padding: 6px 7px 6px 9px;
+  text-align: left;
 }
-.sidebar-link:hover, .sidebar-link.active {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+.source-filter-summary:hover,
+.source-filter-summary.active {
+  border-color: #bfd4fa;
+  background: #f0f5ff;
+  color: #2465dc;
   text-decoration: none;
 }
-.sidebar-more {
+.source-filter-current,
+.source-filter-action {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+.source-filter-current { gap: 6px; }
+.source-filter-current strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #263244;
+  font-size: .78rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-filter-current em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #667085;
+  font-size: .68rem;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1;
+  padding: 3px 6px;
+}
+.source-filter-action {
+  flex: 0 0 auto;
+  color: #7b8798;
+  font-size: .72rem;
+  font-weight: 740;
+  white-space: nowrap;
+}
+.catalog-tree {
+  display: grid;
+  gap: 10px;
+}
+.tree-group {
+  display: grid;
+  gap: 2px;
+}
+.tree-group-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  margin: 0;
+  border-radius: 4px;
+  color: #253247;
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 760;
+  list-style: none;
+  padding: 5px 6px;
+}
+.tree-group-toggle::-webkit-details-marker { display: none; }
+.tree-group-toggle:hover {
+  background: #f5f8fd;
+  color: #2465dc;
+}
+.tree-group-toggle.tree-level-0 {
+  color: #2f7cf6;
+  font-size: .92rem;
+  font-weight: 820;
+}
+.tree-group-toggle.tree-level-1 {
+  color: #243244;
+  font-size: .9rem;
+}
+.tree-group-toggle.tree-level-2,
+.tree-group-toggle.tree-level-3 {
+  color: #344054;
+  font-size: .86rem;
+}
+.tree-group-toggle em {
+  flex: 0 0 auto;
+  margin-left: auto;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #667085;
+  font-size: .68rem;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1;
+  padding: 3px 6px;
+}
+.tree-chevron {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: #8b96a8;
+}
+.tree-chevron::before {
+  content: "›";
   display: block;
-  padding: 6px 8px;
-  color: var(--muted);
-  font-size: 12px;
+  font-size: 18px;
+  line-height: 12px;
+  transform: rotate(90deg);
+}
+.tree-group:not([open]) > .tree-group-toggle .tree-chevron::before {
+  transform: rotate(0deg);
+}
+.tree-children {
+  display: grid;
+  gap: 2px;
+  margin-left: 11px;
+  border-left: 1px solid #eef2f7;
+  padding-left: 9px;
+}
+.tree-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border-radius: 5px;
+  color: #334155;
+  padding: 6px 7px;
+}
+.tree-item:hover,
+.tree-item.active {
+  background: #eaf2ff;
+  color: #155bd7;
+  text-decoration: none;
+}
+.tree-item span,
+.tree-item strong,
+.tree-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-item strong {
+  display: block;
+  font-size: .78rem;
+  font-weight: 760;
+}
+.tree-item small {
+  display: block;
+  color: #7b8798;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: .68rem;
+}
+.tree-item em {
+  color: #7b8798;
+  font-size: .66rem;
+  font-style: normal;
+  font-weight: 760;
 }
 .toolbar {
   display: grid;
@@ -1215,11 +1532,13 @@ code {
 }
 pre {
   overflow-x: auto;
+  min-height: 112px;
+  margin: 0;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #111827;
-  color: #eef5ff;
+  background: #f7fbff;
+  color: #0f172a;
 }
 pre code {
   padding: 0;
@@ -1239,6 +1558,135 @@ pre code {
 }
 dt { color: var(--muted); font-size: 13px; }
 dd { margin: 4px 0 0; font-weight: 650; }
+.interface-head {
+  margin: 0 0 24px;
+  padding: 6px 0 24px;
+  border-bottom: 1px solid #e8eef6;
+}
+.interface-title-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.interface-icon {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border: 1px solid #bfd4fa;
+  border-radius: 7px;
+  background: #eef5ff;
+  color: #2563eb;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 15px;
+  font-weight: 800;
+}
+.interface-head h1 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 10px;
+  color: #172033;
+  font-size: clamp(30px, 3vw, 40px);
+}
+.interface-head h1 span {
+  border: 1px solid #bfd4fa;
+  border-radius: 6px;
+  background: #eef5ff;
+  color: #1d4ed8;
+  font-size: .78rem;
+  font-weight: 760;
+  padding: 3px 7px;
+}
+.interface-head p {
+  margin: 0;
+  color: #314154;
+  font-size: 1rem;
+}
+.interface-section {
+  margin: 0 0 28px;
+  padding-bottom: 26px;
+  border-bottom: 1px solid #e8eef6;
+}
+.interface-section h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  color: #18243a;
+  font-size: 1.18rem;
+}
+.interface-section h2::before {
+  content: "";
+  width: 4px;
+  height: 18px;
+  border-radius: 999px;
+  background: #2563eb;
+}
+.metadata-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  max-width: 820px;
+}
+.metadata-list div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 16px;
+  align-items: baseline;
+}
+.metadata-list dt {
+  color: #7b8798;
+  font-size: .86rem;
+  font-weight: 760;
+}
+.metadata-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #10213d;
+  font-size: .95rem;
+  font-weight: 500;
+}
+.section-note {
+  margin: 18px 0 0;
+  color: #314154;
+}
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.example-grid h3 {
+  margin-top: 0;
+  color: #526173;
+  font-size: .88rem;
+}
+.snapshot-note {
+  margin: 0 0 12px;
+  border: 1px solid #dfe7f2;
+  border-radius: 6px;
+  background: #fbfcfe;
+  color: #40536b;
+  padding: 9px 12px;
+}
+.sample-table {
+  max-width: 100%;
+}
+.sample-table table {
+  min-width: max-content;
+}
+.snapshot-more {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: .86rem;
+}
+.empty-state {
+  margin: 0;
+  color: var(--muted);
+}
 .breadcrumb, .code-title, .build-note, footer {
   color: var(--muted);
 }
@@ -1278,8 +1726,12 @@ footer {
   .site-header { align-items: flex-start; flex-direction: column; }
   .toolbar { grid-template-columns: 1fr; }
   .app-shell { grid-template-columns: 1fr; }
-  .app-sidebar { position: static; max-height: none; }
+  .app-sidebar { position: static; height: auto; max-height: 55vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .app-content { padding: 24px 16px 42px; }
+  .example-grid { grid-template-columns: 1fr; }
+  .metadata-list div { grid-template-columns: 1fr; gap: 2px; }
   main { width: min(100vw - 24px, 1180px); }
+  .page-interfaces main { width: 100%; }
 }
 """
 
