@@ -286,3 +286,9 @@ npm run lint:web
 npm run build:web
 .\.venv\Scripts\python -m compileall -q libs\axdata_core apps\api packages\axdata-sdk services scripts tests
 ```
+
+## 交流
+
+- QQ 群：[点击链接加入群聊](https://qm.qq.com/q/zAjpZsvfzy)
+
+- 邮箱：[dapaoxixixi@163.com](mailto:dapaoxixixi@163.com)
