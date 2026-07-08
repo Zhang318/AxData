@@ -135,6 +135,7 @@ def build_site(output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> dict[str, Any]:
     write_text(output_path / "index.html", render_home(prepared_entries, generated_at))
     write_text(output_path / "interfaces" / "index.html", render_interface_index(prepared_entries, generated_at))
     write_json(output_path / "interfaces" / "catalog.json", catalog_json(prepared_entries, generated_at))
+    write_text(output_path / "interfaces" / "search-index.js", search_index_js(prepared_entries))
 
     for entry in prepared_entries:
         write_text(
@@ -142,8 +143,8 @@ def build_site(output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> dict[str, Any]:
             render_interface_detail(entry, generated_at, prepared_entries),
         )
 
-    rendered_docs = render_doc_pages(output_path)
-    write_text(output_path / "docs" / "index.html", render_docs_index(rendered_docs, generated_at))
+    rendered_docs = render_doc_pages(output_path, prepared_entries)
+    write_text(output_path / "docs" / "index.html", render_docs_index(rendered_docs, generated_at, prepared_entries))
 
     source_counts = Counter(entry["source_name_zh"] for entry in prepared_entries)
     return {
@@ -335,6 +336,114 @@ def normalize_example(raw: Any) -> dict[str, Any]:
     }
 
 
+def interface_search_values(entry: Mapping[str, Any]) -> list[str]:
+    values: list[str] = [
+        str(entry.get("name") or ""),
+        str(entry.get("title") or ""),
+        str(entry.get("source_name_zh") or ""),
+        str(entry.get("source_code") or ""),
+        str(entry.get("category") or ""),
+        str(entry.get("asset_class") or ""),
+        str(entry.get("provider_id") or ""),
+        str(entry.get("summary") or ""),
+        str(entry.get("description_text") or ""),
+        str(entry.get("params_note_zh") or ""),
+        str(entry.get("params_example_zh") or ""),
+        *[str(item) for item in entry.get("menu_path") or []],
+    ]
+
+    for item in entry.get("parameters") or []:
+        if isinstance(item, Mapping):
+            values.extend(
+                [
+                    str(item.get("name") or ""),
+                    str(item.get("dtype") or item.get("type") or ""),
+                    description_for(item),
+                    default_for(item),
+                ]
+            )
+
+    for item in entry.get("fields") or []:
+        if isinstance(item, Mapping):
+            values.extend(
+                [
+                    str(item.get("name") or ""),
+                    str(item.get("dtype") or item.get("type") or ""),
+                    description_for(item),
+                ]
+            )
+
+    for section in entry.get("reference_sections") or []:
+        if not isinstance(section, Mapping):
+            continue
+        values.extend(
+            [
+                str(section.get("id") or ""),
+                str(section.get("title") or ""),
+                str(section.get("note") or ""),
+            ]
+        )
+        values.extend(str(column) for column in section.get("columns") or [])
+        for row in section.get("rows") or []:
+            if isinstance(row, Sequence) and not isinstance(row, (str, bytes, bytearray)):
+                values.extend(str(value) for value in row)
+            else:
+                values.append(str(row))
+
+    return [value.strip() for value in values if value and value.strip()]
+
+
+def interface_search_text(entry: Mapping[str, Any]) -> str:
+    return " ".join(interface_search_values(entry)).lower()
+
+
+def interface_search_signals(entry: Mapping[str, Any]) -> list[str]:
+    signals: list[str] = []
+    for item in entry.get("fields") or []:
+        if not isinstance(item, Mapping):
+            continue
+        name = str(item.get("name") or "").strip()
+        description = description_for(item)
+        if name or description:
+            signals.append(f"返回字段 {name} {description}".strip())
+    for item in entry.get("parameters") or []:
+        if not isinstance(item, Mapping):
+            continue
+        name = str(item.get("name") or "").strip()
+        description = description_for(item)
+        if name or description:
+            signals.append(f"输入参数 {name} {description}".strip())
+    return signals
+
+
+def interface_search_payload(entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for entry in entries:
+        menu_path = " / ".join(str(item) for item in entry.get("menu_path") or [])
+        payload.append(
+            {
+                "title": str(entry.get("title") or entry.get("name") or ""),
+                "name": str(entry.get("name") or ""),
+                "source": str(entry.get("source_name_zh") or ""),
+                "category": str(entry.get("category") or ""),
+                "menuPath": menu_path,
+                "summary": str(entry.get("summary") or ""),
+                "slug": str(entry.get("slug") or ""),
+                "searchText": interface_search_text(entry),
+                "signals": interface_search_signals(entry),
+            }
+        )
+    return payload
+
+
+def script_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+
+def search_index_js(entries: Sequence[Mapping[str, Any]]) -> str:
+    return f"window.__AXDATA_INTERFACE_SEARCH__={script_json(interface_search_payload(entries))};\n"
+
+
 def catalog_json(entries: Sequence[Mapping[str, Any]], generated_at: str) -> dict[str, Any]:
     return {
         "project": "AxData",
@@ -423,7 +532,7 @@ def render_home(entries: Sequence[Mapping[str, Any]], generated_at: str) -> str:
 </section>
 <p class="build-note">生成时间：{escape(generated_at)}</p>
 """
-    return page("AxData 文档站", body, active="home")
+    return page("AxData 文档站", body, active="home", search_entries=entries)
 
 
 def render_interface_index(entries: Sequence[Mapping[str, Any]], generated_at: str) -> str:
@@ -492,7 +601,7 @@ sourceFilter.addEventListener("change", applyFilters);
 </script>
 """
     body = app_shell(interface_sidebar(entries), content)
-    return page("接口文档 - AxData", body, active="interfaces")
+    return page("接口文档 - AxData", body, active="interfaces", search_entries=entries)
 
 
 def app_shell(sidebar: str, content: str) -> str:
@@ -606,16 +715,7 @@ def render_nav_item(entry: Mapping[str, Any], active_slug: str | None, level: in
 def render_interface_index_row(entry: Mapping[str, Any]) -> str:
     params = entry.get("parameters") or []
     fields = entry.get("fields") or []
-    text = " ".join(
-        [
-            str(entry.get("name") or ""),
-            str(entry.get("title") or ""),
-            str(entry.get("source_name_zh") or ""),
-            " ".join(str(item) for item in entry.get("menu_path") or []),
-            " ".join(str(item.get("name", "")) for item in params if isinstance(item, Mapping)),
-            " ".join(str(item.get("name", "")) for item in fields if isinstance(item, Mapping)),
-        ]
-    ).lower()
+    text = interface_search_text(entry)
     menu_path = " / ".join(str(item) for item in entry.get("menu_path") or [])
     return f"""
 <tr data-source="{escape(str(entry['source_name_zh']))}" data-text="{escape(text)}">
@@ -701,10 +801,10 @@ def render_interface_detail(
 <p class="build-note">生成时间：{escape(generated_at)}</p>
 """
     body = app_shell(interface_sidebar(entries, active_slug=str(entry["slug"])), content)
-    return page(f"{entry['title']} - AxData 接口文档", body, active="interfaces")
+    return page(f"{entry['title']} - AxData 接口文档", body, active="interfaces", search_entries=entries)
 
 
-def render_doc_pages(output_path: Path) -> list[dict[str, str]]:
+def render_doc_pages(output_path: Path, search_entries: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     rendered: list[dict[str, str]] = []
     for filename, title in DOC_PAGES:
         source = REPO_ROOT / "docs" / filename
@@ -719,12 +819,19 @@ def render_doc_pages(output_path: Path) -> list[dict[str, str]]:
 </section>
 <article class="markdown-body">{html}</article>
 """
-        write_text(output_path / "docs" / f"{slug}.html", page(f"{title} - AxData 文档", body, active="docs"))
+        write_text(
+            output_path / "docs" / f"{slug}.html",
+            page(f"{title} - AxData 文档", body, active="docs", search_entries=search_entries),
+        )
         rendered.append({"title": title, "slug": slug, "filename": filename})
     return rendered
 
 
-def render_docs_index(docs: Sequence[Mapping[str, str]], generated_at: str) -> str:
+def render_docs_index(
+    docs: Sequence[Mapping[str, str]],
+    generated_at: str,
+    search_entries: Sequence[Mapping[str, Any]],
+) -> str:
     items = "".join(
         f"<a class=\"doc-card\" href=\"{escape(doc['slug'])}.html\"><strong>{escape(doc['title'])}</strong><span>{escape(doc['filename'])}</span></a>"
         for doc in docs
@@ -738,7 +845,7 @@ def render_docs_index(docs: Sequence[Mapping[str, str]], generated_at: str) -> s
 <section class="doc-grid">{items}</section>
 <p class="build-note">生成时间：{escape(generated_at)}</p>
 """
-    return page("开发文档 - AxData", body, active="docs")
+    return page("开发文档 - AxData", body, active="docs", search_entries=search_entries)
 
 
 def markdown_to_html(markdown: str, *, base_depth: int = 0) -> str:
@@ -890,7 +997,181 @@ def normalize_doc_href(href: str) -> str:
     return clean
 
 
-def page(title: str, body: str, *, active: str) -> str:
+def render_site_search(entries: Sequence[Mapping[str, Any]], active: str) -> str:
+    if not entries:
+        return ""
+    interface_base = root_link(active, "interfaces/")
+    return f"""
+    <div class="site-search" role="search" data-interface-base="{escape(interface_base)}">
+      <label class="visually-hidden" for="site-interface-search">搜索接口</label>
+      <input id="site-interface-search" type="search" placeholder="搜索接口、字段、说明" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="site-search-results">
+      <div class="site-search-results" id="site-search-results" role="listbox" hidden></div>
+    </div>"""
+
+
+def site_search_script() -> str:
+    return """
+<script>
+(() => {
+  const input = document.getElementById("site-interface-search");
+  const panel = document.getElementById("site-search-results");
+  const shell = input ? input.closest(".site-search") : null;
+  if (!input || !panel || !shell) return;
+
+  const docs = Array.isArray(window.__AXDATA_INTERFACE_SEARCH__) ? window.__AXDATA_INTERFACE_SEARCH__ : [];
+  const interfaceBase = shell.dataset.interfaceBase || "interfaces/";
+
+  const maxResults = 8;
+  let results = [];
+  let activeIndex = -1;
+  const normalize = (value) => String(value || "").trim().toLocaleLowerCase("zh-CN");
+  const tokensFor = (query) => normalize(query).split(/\\s+/).filter(Boolean);
+
+  function scoreDoc(doc, tokens, fullQuery) {
+    const text = normalize(doc.searchText);
+    if (!tokens.length || tokens.some((token) => !text.includes(token))) return 0;
+
+    const title = normalize(doc.title);
+    const name = normalize(doc.name);
+    const source = normalize(doc.source);
+    const category = normalize(doc.category);
+    const menuPath = normalize(doc.menuPath);
+    const summary = normalize(doc.summary);
+    let score = 0;
+
+    if (title === fullQuery || name === fullQuery) score += 160;
+    for (const token of tokens) {
+      if (title === token || name === token) score += 90;
+      if (title.startsWith(token) || name.startsWith(token)) score += 50;
+      if (title.includes(token)) score += 36;
+      if (name.includes(token)) score += 34;
+      if (source.includes(token) || category.includes(token) || menuPath.includes(token)) score += 16;
+      if (summary.includes(token)) score += 10;
+      score += 2;
+    }
+    return score;
+  }
+
+  function matchSignal(doc, tokens) {
+    for (const signal of doc.signals || []) {
+      const text = normalize(signal);
+      if (tokens.every((token) => text.includes(token))) return signal;
+    }
+    return doc.summary || doc.menuPath || doc.name;
+  }
+
+  function setExpanded(expanded) {
+    input.setAttribute("aria-expanded", String(expanded));
+    panel.hidden = !expanded;
+  }
+
+  function setActive(index) {
+    activeIndex = index;
+    Array.from(panel.querySelectorAll(".site-search-result")).forEach((item, itemIndex) => {
+      const active = itemIndex === activeIndex;
+      item.classList.toggle("active", active);
+      item.setAttribute("aria-selected", String(active));
+    });
+  }
+
+  function appendText(parent, tagName, className, text) {
+    const element = document.createElement(tagName);
+    if (className) element.className = className;
+    element.textContent = text;
+    parent.appendChild(element);
+    return element;
+  }
+
+  function resultUrl(doc) {
+    return interfaceBase + String(doc.slug || doc.name || "").replace(/\\.html$/, "") + ".html";
+  }
+
+  function render() {
+    const query = input.value;
+    const tokens = tokensFor(query);
+    const fullQuery = normalize(query);
+    panel.textContent = "";
+    results = [];
+    activeIndex = -1;
+
+    if (!tokens.length) {
+      setExpanded(false);
+      return;
+    }
+
+    results = docs
+      .map((doc) => ({ ...doc, score: scoreDoc(doc, tokens, fullQuery), signal: matchSignal(doc, tokens) }))
+      .filter((doc) => doc.score > 0)
+      .sort((left, right) => right.score - left.score || String(left.title).localeCompare(String(right.title), "zh-CN"))
+      .slice(0, maxResults);
+
+    if (!results.length) {
+      appendText(panel, "div", "site-search-empty", "没有找到匹配接口");
+      setExpanded(true);
+      return;
+    }
+
+    results.forEach((doc, index) => {
+      const item = document.createElement("a");
+      item.className = "site-search-result";
+      item.href = resultUrl(doc);
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", "false");
+      item.tabIndex = -1;
+      item.addEventListener("mouseenter", () => setActive(index));
+
+      const head = document.createElement("span");
+      head.className = "site-search-result-head";
+      appendText(head, "strong", "", doc.title || doc.name);
+      appendText(head, "code", "", doc.name || "");
+      item.appendChild(head);
+
+      appendText(item, "span", "site-search-result-meta", [doc.source, doc.category].filter(Boolean).join(" / "));
+      appendText(item, "small", "", doc.signal || doc.summary || "");
+      panel.appendChild(item);
+    });
+
+    setExpanded(true);
+    setActive(0);
+  }
+
+  input.addEventListener("input", render);
+  input.addEventListener("focus", render);
+  input.addEventListener("keydown", (event) => {
+    if (panel.hidden && event.key !== "Escape") render();
+    if (event.key === "Escape") {
+      input.value = "";
+      setExpanded(false);
+      return;
+    }
+    if (!results.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActive(Math.min(activeIndex + 1, results.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActive(Math.max(activeIndex - 1, 0));
+    } else if (event.key === "Enter" && activeIndex >= 0) {
+      event.preventDefault();
+      window.location.href = resultUrl(results[activeIndex]);
+    }
+  });
+
+  document.addEventListener("mousedown", (event) => {
+    if (!(event.target instanceof Element) || !event.target.closest(".site-search")) setExpanded(false);
+  });
+})();
+</script>
+"""
+
+
+def page(
+    title: str,
+    body: str,
+    *,
+    active: str,
+    search_entries: Sequence[Mapping[str, Any]] | None = None,
+) -> str:
     nav_items = (
         ("home", "首页", root_link(active, "index.html")),
         ("interfaces", "接口文档", root_link(active, "interfaces/index.html")),
@@ -902,6 +1183,12 @@ def page(title: str, body: str, *, active: str) -> str:
         for key, label, href in nav_items
     )
     css_href = root_link(active, "styles.css")
+    search = render_site_search(search_entries or [], active)
+    if search_entries:
+        index_src = root_link(active, "interfaces/search-index.js")
+        search_script = f"<script src=\"{escape(index_src)}\"></script>\n{site_search_script()}"
+    else:
+        search_script = ""
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -913,10 +1200,12 @@ def page(title: str, body: str, *, active: str) -> str:
 <body class="page-{escape(active)}">
   <header class="site-header">
     <a class="brand" href="{escape(root_link(active, 'index.html'))}"><span class="brand-mark"></span><span>AxData</span></a>
+{search}
     <nav>{nav}</nav>
   </header>
   <main>{body}</main>
   <footer>AxData 是一个开源量化数据库框架，主要面向个人学习、技术研究和本地数据管理。</footer>
+{search_script}
 </body>
 </html>
 """
@@ -1261,6 +1550,94 @@ nav a.active, nav a:hover {
   background: var(--accent-soft);
   color: var(--accent-strong);
   text-decoration: none;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.site-search {
+  position: relative;
+  flex: 1 1 360px;
+  max-width: 560px;
+  min-width: 240px;
+}
+.site-search input {
+  min-height: 38px;
+  border-color: #cfdced;
+  background: #fbfdff;
+  padding: 8px 12px;
+}
+.site-search input:focus {
+  border-color: #8db7f7;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+  outline: none;
+}
+.site-search-results {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  left: 0;
+  z-index: 60;
+  max-height: min(70vh, 430px);
+  overflow-y: auto;
+  border: 1px solid #d8e3f2;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, .14);
+  padding: 6px;
+}
+.site-search-result {
+  display: grid;
+  gap: 2px;
+  border-radius: 6px;
+  color: #253247;
+  padding: 9px 10px;
+}
+.site-search-result:hover,
+.site-search-result.active {
+  background: #eef5ff;
+  color: #155bd7;
+  text-decoration: none;
+}
+.site-search-result-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+.site-search-result strong,
+.site-search-result code,
+.site-search-result span,
+.site-search-result small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-search-result strong {
+  font-size: .9rem;
+  font-weight: 780;
+}
+.site-search-result code {
+  color: #526173;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: .76rem;
+}
+.site-search-result-meta {
+  color: #64748b;
+  font-size: .76rem;
+}
+.site-search-result small,
+.site-search-empty {
+  color: #526173;
+  font-size: .78rem;
+}
+.site-search-empty {
+  padding: 12px;
 }
 main {
   width: min(1380px, calc(100vw - 32px));
@@ -1847,7 +2224,9 @@ footer {
   font-size: 14px;
 }
 @media (max-width: 720px) {
-  .site-header { align-items: flex-start; flex-direction: column; }
+  .site-header { align-items: flex-start; flex-direction: column; padding-top: 10px; padding-bottom: 10px; }
+  .site-search { width: 100%; max-width: none; min-width: 0; }
+  nav { width: 100%; }
   .toolbar { grid-template-columns: 1fr; }
   .app-shell { grid-template-columns: 1fr; }
   .app-sidebar { position: static; height: auto; max-height: 55vh; border-right: 0; border-bottom: 1px solid var(--line); }
