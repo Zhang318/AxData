@@ -114,6 +114,44 @@ client = ax.AxDataClient()
 stocks = client.stock_basic_exchange(exchange="SSE", fields=["instrument_id", "name"])
 ```
 
+## 升级现有安装
+
+升级命令取决于最初的安装方式。通过 PyPI 安装的 Python 包可以直接升级到最新版本：
+
+```powershell
+python -m pip install --upgrade axdata
+```
+
+使用虚拟环境时，请调用虚拟环境中的 Python。
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\python -m pip install --upgrade axdata
+```
+
+macOS / Linux：
+
+```bash
+./.venv/bin/python -m pip install --upgrade axdata
+```
+
+通过 Git clone 和 bootstrap 安装的完整项目，请进入项目目录，拉取最新代码后重新运行 bootstrap。该过程会更新本地 Python editable 安装和 Web 依赖，不会删除 `data/`、`metadata/`、`cache/` 或 `logs/` 中的本地数据。
+
+Windows PowerShell：
+
+```powershell
+git pull --ff-only
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
+```
+
+macOS / Linux：
+
+```bash
+git pull --ff-only
+bash scripts/bootstrap.sh
+```
+
 ## 2. 源码开发说明
 
 完整项目安装完成后，可以查看插件和本机状态：

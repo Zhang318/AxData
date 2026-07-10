@@ -20,15 +20,13 @@
   <a href="./LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/协议-Apache--2.0-blue"></a>
 </p>
 
+![AxData 界面预览](docs/assets/axdata-readme-banner.png)
+
 <p align="center">
   <a href="https://api.astlane.com/">
     <img alt="Astlane token 赞助方" src="docs/assets/astlane-sponsor.svg" width="860">
   </a>
-  <br>
-  <strong>本项目所有token均由<a href="https://api.astlane.com/">Astlane</a>赞助。</strong>
 </p>
-
-![AxData 界面预览](docs/assets/axdata-readme-banner.png)
 
 ## 项目简介
 
@@ -144,6 +142,30 @@ pip install axdata
 ```
 
 `pip install axdata` 面向 Python SDK 和 CLI 使用，会安装 AxData Python 主包、核心依赖，以及随包提供的数据源能力。完整 Web 控制台、接口文档、本地 API 服务和前端源码请使用上面的完整项目安装方式。
+
+**升级现有安装**
+
+通过 PyPI 安装的 Python 包：
+
+```powershell
+python -m pip install --upgrade axdata
+```
+
+通过源码安装的完整项目，请在项目目录运行：
+
+Windows PowerShell：
+
+```powershell
+git pull --ff-only
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
+```
+
+macOS / Linux：
+
+```bash
+git pull --ff-only
+bash scripts/bootstrap.sh
+```
 
 ## 核心能力
 
