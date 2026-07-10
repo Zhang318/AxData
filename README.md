@@ -20,6 +20,14 @@
   <a href="./LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/协议-Apache--2.0-blue"></a>
 </p>
 
+<p align="center">
+  <a href="https://api.astlane.com/">
+    <img alt="Astlane token 赞助方" src="docs/assets/astlane-sponsor.svg" width="860">
+  </a>
+  <br>
+  <strong>本项目所有token均由<a href="https://api.astlane.com/">Astlane</a>赞助。</strong>
+</p>
+
 ![AxData 界面预览](docs/assets/axdata-readme-banner.png)
 
 ## 项目简介
@@ -290,5 +298,3 @@ npm run build:web
 ## 交流
 
 - QQ 群：[点击链接加入群聊](https://qm.qq.com/q/zAjpZsvfzy)
-
-- 邮箱：[dapaoxixixi@163.com](mailto:dapaoxixixi@163.com)
