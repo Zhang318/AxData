@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # AxData API image. Build from the AxData repository root.
 ARG BASE_IMAGE=python:3.12-slim
 FROM ${BASE_IMAGE}
@@ -25,9 +24,9 @@ RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR
 
 # Install third-party dependencies in cacheable layers. Application source changes
 # after these layers no longer cause pandas/pyarrow/FastAPI to be downloaded again.
+# Do not use BuildKit-only cache mounts: this image also supports legacy builders.
 COPY pyproject.toml /app/
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m pip install --upgrade pip \
+RUN python -m pip install --upgrade pip \
     && python -m pip install --prefer-binary .
 
 COPY libs/axdata_core /app/libs/axdata_core
@@ -38,8 +37,7 @@ COPY packages/axdata-source-cninfo /app/packages/axdata-source-cninfo
 COPY packages/axdata-sdk /app/packages/axdata-sdk
 
 # Install the API dependencies and every Provider bundled in this repository.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m pip install --prefer-binary ./libs/axdata_core \
+RUN python -m pip install --prefer-binary ./libs/axdata_core \
     && python -m pip install ./packages/axdata-source-tdx \
     && python -m pip install ./packages/axdata-source-tdx-ext \
     && python -m pip install ./packages/axdata-source-tencent \
